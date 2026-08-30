@@ -1,0 +1,34 @@
+name: 微博热点实时监控
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # 每 10 分钟运行一次（UTC 时间）
+  workflow_dispatch: {}
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 运行监控脚本
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python weibo_narrative_watch.py
+
+      - name: 保存监控状态(state.json)
+        run: |
+          git config user.name "weibo-narrative-watch-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add weibo_state.json
+          git diff --staged --quiet || git commit -m "更新微博监控状态 [skip ci]"
+          git push
