@@ -4,17 +4,17 @@
     "SKR",
     "PUMP",
     "HNT",
-    "MON",
-    "ZEC",
-    "CASHCAT",
     "LIT",
-    "SOL",
+    "ZEC",
+    "PENGU",
     "UNI",
+    "MON",
+    "SOL",
     "HYPE",
+    "INDEX",
+    "TAO",
     "SPX",
-    "CRO",
-    "ZORA",
-    "PENGU"
+    "BASECAT"
   ],
   "alerted_categories": {
     "OTC Marketplace": 4.7581525702814575
