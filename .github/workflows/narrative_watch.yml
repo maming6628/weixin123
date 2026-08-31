@@ -22,7 +22,6 @@ jobs:
 
       - name: 运行监控脚本
         env:
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
           LUNARCRUSH_API_KEY: ${{ secrets.LUNARCRUSH_API_KEY }}
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: python narrative_watch.py
