@@ -2,9 +2,6 @@ name: 链上叙事监控
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
-  workflow_dispatch: {}
-
 jobs:
   watch:
     runs-on: ubuntu-latest
