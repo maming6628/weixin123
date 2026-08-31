@@ -5,16 +5,16 @@
     "PUMP",
     "HNT",
     "LIT",
-    "ZEC",
-    "PENGU",
-    "UNI",
     "MON",
+    "BTR",
+    "PENGU",
     "SOL",
-    "HYPE",
+    "ONDO",
+    "BTC",
     "INDEX",
-    "TAO",
-    "SPX",
-    "BASECAT"
+    "ZORA",
+    "UNI",
+    "TAO"
   ],
   "alerted_categories": {
     "OTC Marketplace": 4.7581525702814575
