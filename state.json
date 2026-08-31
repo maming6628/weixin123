@@ -1,22 +1,23 @@
 {
   "last_trending_coins": [
     "PONS",
-    "SKR",
     "HNT",
     "HYPE",
+    "BOME",
+    "SKR",
+    "LIT",
+    "PENGU",
+    "BTC",
     "PUMP",
     "LINK",
-    "BTC",
     "SOL",
-    "BOME",
-    "PENGU",
-    "LIT",
-    "POL",
-    "ETH",
-    "KAS",
-    "牛来"
+    "ZEC",
+    "CASHCAT",
+    "PI",
+    "UNI"
   ],
   "alerted_categories": {
-    "OTC Marketplace": 4.7581525702814575
+    "OTC Marketplace": 4.7581525702814575,
+    "Uncollateralized Lending": 45.25446313249234
   }
 }
