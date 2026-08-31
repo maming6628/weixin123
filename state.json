@@ -1,4 +1,22 @@
 {
-  "last_trending_coins": [],
-  "alerted_categories": {}
+  "last_trending_coins": [
+    "SKR",
+    "PONS",
+    "PUMP",
+    "HYPE",
+    "BTC",
+    "HNT",
+    "PENGU",
+    "SOL",
+    "LIT",
+    "牛来",
+    "ZORA",
+    "CASHCAT",
+    "CRO",
+    "UNI",
+    "INDEX"
+  ],
+  "alerted_categories": {
+    "OTC Marketplace": 4.7581525702814575
+  }
 }
