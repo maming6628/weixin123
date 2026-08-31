@@ -4,8 +4,8 @@
 链上叙事监控 v4（全免费版）-> 微信推送
 
 【和 v3 的区别】
-LunarCrush 需要付费套餐（最低约 $72/月）才能访问任何接口，v3 的免费额度实际上
-根本不存在。v4 换成两个完全免费、不需要注册/不需要 API key 的数据源：
+LunarCrush 需要付费套餐才能访问任何接口，v3 的免费额度实际上根本不存在。
+v4 换成两个完全免费、不需要注册/不需要 API key 的数据源：
 
 1. CoinGecko 趋势榜（/search/trending）
    过去24小时被搜索最多的币种和赛道，免费无需key。
@@ -169,4 +169,54 @@ def push_to_wechat(title, content):
         else:
             print(f"[失败] {result}")
     except Exception:
-  
+        print(f"[失败] 推送返回异常: {resp.text}")
+
+
+def main():
+    state = load_state()
+
+    # 信号一：新晋趋势币
+    trending_coins = fetch_trending_coins()
+    new_coins = detect_new_trending(trending_coins, state) if trending_coins else []
+
+    # 信号二：赛道资金流
+    protocols = fetch_defillama_protocols()
+    surging_categories = []
+    if protocols:
+        category_stats = aggregate_category_flow(protocols)
+        print(f"[调试] 聚合出 {len(category_stats)} 个赛道(过滤小赛道后)")
+        surging_categories = detect_surging_categories(category_stats, state)
+
+    save_state(state)
+
+    if not new_coins and not surging_categories:
+        print("本次没有新信号，不推送")
+        return
+
+    lines = []
+    if new_coins:
+        lines.append("【新晋趋势币】")
+        for c in new_coins:
+            rank_str = f"(市值排名第{c['market_cap_rank']}名)" if c.get("market_cap_rank") else ""
+            lines.append(f"🆕 {c['name']} ({c['symbol'].upper()}) {rank_str}")
+        lines.append("")
+
+    if surging_categories:
+        lines.append("【资金流入加速的赛道】")
+        surging_categories.sort(key=lambda x: x[1]["avg_change_1h"], reverse=True)
+        for cat, stats in surging_categories:
+            lines.append(f"📈 {cat}：近1小时锁仓资金加权变化 +{stats['avg_change_1h']:.1f}%")
+            top_str = "、".join([f"{name}" for name, _, _ in stats["top_protocols"]])
+            if top_str:
+                lines.append(f"   由 {top_str} 等带动")
+        lines.append("")
+
+    content = "\n".join(lines)
+    title = f"链上叙事提醒：{len(new_coins)}个新趋势币 / {len(surging_categories)}个赛道升温"
+    print(title)
+    print(content)
+    push_to_wechat(title, content)
+
+
+if __name__ == "__main__":
+    main()
