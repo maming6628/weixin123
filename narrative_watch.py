@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-链上叙事监控 -> 微信推送
+链上叙事监控 v2 -> 微信推送
 
-两路信号：
-1. 指定 KOL 账号在 X 上的最新推文（用 X API v2）
-2. LunarCrush 的热度榜（Galaxy Score / AltRank / 社交热度），
-   检测排名跳升 / 热度突增的币种或话题
+【和上一版的区别】
+1. 去掉了 X(推特) KOL 推文监控。原因：X 官方 API 从 2026年2月起改成按量付费，
+   免费层基本只能发帖、不能读取时间线，免费方案下这条路走不通。
+   如果你之后愿意付费开通，可以再加回来（成本大概几美元/月级别，看监控频率）。
 
-有新推文，或者某个币/话题热度出现明显跳变时，通过 Server酱 推送到微信。
+2. 叙事监控换成 LunarCrush 的"加密货币类别热门话题榜"接口
+   （category/cryptocurrencies/topics），这是按"话题"而不是按"单个币"排名的，
+   更贴近"叙事"这个概念（比如"AI币""meme币""RWA"这种主题，而不只是BTC/ETH这种大币）。
+   接口自带"1小时前排名""24小时前排名"字段，用来判断"是不是正在被更多人讨论"。
 
-依赖的三把 key（都需要你自己申请，免费额度通常够用于个人监控）：
-- X_BEARER_TOKEN     -> https://developer.x.com/  (X API v2，免费层每月有请求额度限制)
-- LUNARCRUSH_API_KEY -> https://lunarcrush.com/developers/api  (有免费/试用额度)
-- SERVERCHAN_KEY     -> https://sct.ftqq.com/ (微信扫码登录即可获取)
+3. 对触发了"正在升温"的话题，额外调用 LunarCrush 的 AI 摘要接口，
+   生成一句话说明"这个话题现在在聊什么"，让推送更有实际信息量，不只是干巴巴的排名数字。
+
+依赖：
+- LUNARCRUSH_API_KEY -> https://lunarcrush.com/developers/api
+- SERVERCHAN_KEY     -> https://sct.ftqq.com/
 
 用法：
-    export X_BEARER_TOKEN="..."
     export LUNARCRUSH_API_KEY="..."
     export SERVERCHAN_KEY="..."
     python3 narrative_watch.py
-
-首次运行会建立基线（state.json），之后每次运行只报"新出现的东西"，
-不会重复推送同样的内容。建议用 GitHub Actions 定时跑（见 workflows/narrative_watch.yml），
-比如每 30 分钟一次。
 """
 
 import os
@@ -31,30 +31,24 @@ import sys
 import json
 import requests
 
-# ------------ 配置：按需修改 ------------
-# 你想盯的 KOL，填 X 用户名（不带 @）
-KOL_USERNAMES = [
-    "example_kol_1",
-    "example_kol_2",
-]
-
-# LunarCrush 热度榜：监控 Top N 币种，排名跳升超过 RANK_JUMP_THRESHOLD 名就报警
-LUNARCRUSH_TOP_N = 30
-RANK_JUMP_THRESHOLD = 10  # 排名比上次监控上升超过这么多名，就当作"热度突增"
-
+# ------------ 配置 ------------
+TOP_N = 30                # 监控加密类别话题榜前多少名
+RANK_JUMP_THRESHOLD = 8    # 排名比"1小时前"跳升超过这个数字，判定为"正在升温"
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
-# --------------------------------------------
+# --------------------------------
 
-X_BEARER_TOKEN = os.environ.get("X_BEARER_TOKEN", "")
 LUNARCRUSH_API_KEY = os.environ.get("LUNARCRUSH_API_KEY", "")
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY", "")
+
+CATEGORY_TOPICS_URL = "https://lunarcrush.com/api4/public/category/cryptocurrencies/topics/v1"
+TOPIC_WHATSUP_URL = "https://lunarcrush.com/api4/public/topic/{topic}/whatsup/v1"
 
 
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"last_tweet_id": {}, "last_rank": {}}
+    return {"alerted_topics": {}}  # 记录已经提醒过的话题，避免重复推送
 
 
 def save_state(state):
@@ -62,96 +56,61 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-# ---------- 信号一：KOL 新推文 ----------
-def fetch_new_tweets(state):
-    if not X_BEARER_TOKEN:
-        print("[跳过] 未配置 X_BEARER_TOKEN，跳过 KOL 推文监控")
-        return []
-
-    headers = {"Authorization": f"Bearer {X_BEARER_TOKEN}"}
-    alerts = []
-
-    for username in KOL_USERNAMES:
-        try:
-            # 1. 用户名 -> user_id
-            user_resp = requests.get(
-                f"https://api.x.com/2/users/by/username/{username}",
-                headers=headers,
-                timeout=10,
-            )
-            user_resp.raise_for_status()
-            user_id = user_resp.json()["data"]["id"]
-
-            # 2. 拉取最新推文
-            since_id = state["last_tweet_id"].get(username)
-            params = {"max_results": 5, "tweet.fields": "created_at"}
-            if since_id:
-                params["since_id"] = since_id
-
-            tweets_resp = requests.get(
-                f"https://api.x.com/2/users/{user_id}/tweets",
-                headers=headers,
-                params=params,
-                timeout=10,
-            )
-            tweets_resp.raise_for_status()
-            tweets = tweets_resp.json().get("data", [])
-
-            if tweets:
-                # 记录最新的 tweet id 作为下次的 since_id
-                state["last_tweet_id"][username] = tweets[0]["id"]
-                for t in reversed(tweets):  # 按时间正序推送
-                    alerts.append(
-                        f"@{username} 发新推文：\n{t['text']}\n"
-                        f"https://x.com/{username}/status/{t['id']}"
-                    )
-        except Exception as e:
-            print(f"[警告] 抓取 @{username} 推文失败: {e}")
-
-    return alerts
-
-
-# ---------- 信号二：LunarCrush 热度榜跳变 ----------
-def fetch_narrative_shifts(state):
+def fetch_crypto_topics():
+    """拉取加密货币类别下的热门话题榜"""
     if not LUNARCRUSH_API_KEY:
-        print("[跳过] 未配置 LUNARCRUSH_API_KEY，跳过热度榜监控")
+        print("[错误] 未配置 LUNARCRUSH_API_KEY")
         return []
 
-    alerts = []
+    headers = {"Authorization": f"Bearer {LUNARCRUSH_API_KEY}"}
+    resp = requests.get(CATEGORY_TOPICS_URL, headers=headers, timeout=15)
+    print(f"[调试] 请求话题榜接口，状态码: {resp.status_code}")
+    resp.raise_for_status()
+    data = resp.json().get("data", [])
+    print(f"[调试] 拉取到 {len(data)} 个话题")
+    return data[:TOP_N]
+
+
+def fetch_whatsup(topic):
+    """调用AI摘要接口，获取某个话题当前在聊什么（一句话）"""
     try:
-        resp = requests.get(
-            "https://lunarcrush.com/api4/public/coins/list/v2",
-            headers={"Authorization": f"Bearer {LUNARCRUSH_API_KEY}"},
-            params={"sort": "galaxy_score", "limit": LUNARCRUSH_TOP_N},
-            timeout=15,
-        )
+        headers = {"Authorization": f"Bearer {LUNARCRUSH_API_KEY}"}
+        url = TOPIC_WHATSUP_URL.format(topic=topic)
+        resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
-        coins = resp.json().get("data", [])
-
-        last_rank = state.get("last_rank", {})
-        new_rank = {}
-
-        for idx, coin in enumerate(coins, start=1):
-            symbol = coin.get("symbol", "")
-            new_rank[symbol] = idx
-            prev = last_rank.get(symbol)
-
-            if prev is None and last_rank:
-                # 首次进入榜单（且不是第一次运行）
-                alerts.append(f"🆕 {symbol} 首次进入热度榜 Top{LUNARCRUSH_TOP_N}，当前排名第 {idx}")
-            elif prev is not None and (prev - idx) >= RANK_JUMP_THRESHOLD:
-                alerts.append(
-                    f"📈 {symbol} 热度排名跳升：第 {prev} 名 -> 第 {idx} 名"
-                )
-
-        state["last_rank"] = new_rank
+        return resp.json().get("summary", "")
     except Exception as e:
-        print(f"[警告] 拉取 LunarCrush 榜单失败: {e}")
+        print(f"[警告] 获取 {topic} 摘要失败: {e}")
+        return ""
 
-    return alerts
+
+def detect_surging_topics(topics, state):
+    """找出排名比1小时前明显跳升的话题，且没有在最近提醒过的"""
+    alerted = state.get("alerted_topics", {})
+    surging = []
+
+    for item in topics:
+        topic = item.get("topic", "")
+        title = item.get("title", topic)
+        rank = item.get("topic_rank")
+        rank_1h_prev = item.get("topic_rank_1h_previous")
+
+        if not topic or rank is None or rank_1h_prev is None:
+            continue
+
+        jump = rank_1h_prev - rank  # 正数表示排名上升(数字变小=更火)
+        if jump >= RANK_JUMP_THRESHOLD:
+            # 避免同一个话题短时间内被反复提醒：如果上次提醒时排名跟这次差不多，跳过
+            last_alerted_rank = alerted.get(topic)
+            if last_alerted_rank is not None and abs(last_alerted_rank - rank) < 3:
+                continue
+            surging.append((topic, title, rank, rank_1h_prev, jump))
+            alerted[topic] = rank
+
+    state["alerted_topics"] = alerted
+    return surging
 
 
-# ---------- 推送 ----------
 def push_to_wechat(title, content):
     if not SERVERCHAN_KEY:
         print("[错误] 未配置 SERVERCHAN_KEY，无法推送")
@@ -171,23 +130,29 @@ def push_to_wechat(title, content):
 def main():
     state = load_state()
 
-    tweet_alerts = fetch_new_tweets(state)
-    narrative_alerts = fetch_narrative_shifts(state)
+    topics = fetch_crypto_topics()
+    if not topics:
+        print("[警告] 没拉到话题数据，检查 LUNARCRUSH_API_KEY 是否正确/是否有权限访问该接口")
+        save_state(state)
+        sys.exit(1)
 
-    all_alerts = []
-    if tweet_alerts:
-        all_alerts.append("【KOL 新动态】\n" + "\n\n".join(tweet_alerts))
-    if narrative_alerts:
-        all_alerts.append("【热度榜异动】\n" + "\n".join(narrative_alerts))
-
+    surging = detect_surging_topics(topics, state)
     save_state(state)
 
-    if not all_alerts:
-        print("本次没有新信号，不推送")
+    if not surging:
+        print("本次没有明显升温的叙事话题，不推送")
         return
 
-    title = f"链上叙事提醒：{len(tweet_alerts)}条新推文 / {len(narrative_alerts)}条热度异动"
-    content = "\n\n---\n\n".join(all_alerts)
+    lines = []
+    for topic, title, rank, prev_rank, jump in surging:
+        lines.append(f"📈 {title}：第 {prev_rank} 名(1小时前) -> 第 {rank} 名")
+        summary = fetch_whatsup(topic)
+        if summary:
+            lines.append(f"   💬 {summary}")
+        lines.append("")
+
+    content = "\n".join(lines)
+    title = f"链上叙事提醒：{len(surging)}个话题正在升温"
     print(title)
     print(content)
     push_to_wechat(title, content)
