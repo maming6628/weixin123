@@ -1,4 +1,10 @@
 {
-  "user_ids": {},
-  "last_tweet_id": {}
+  "user_ids": {
+    "jiujinshan2022": "1431214429840896003",
+    "lanaaielsa": "1888258491745181696"
+  },
+  "last_tweet_id": {
+    "jiujinshan2022": "2094024639303545223",
+    "lanaaielsa": "2094018617025389001"
+  }
 }
