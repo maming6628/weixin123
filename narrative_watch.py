@@ -1,29 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-链上叙事监控 v3 -> 微信推送
+链上叙事监控 v4（全免费版）-> 微信推送
 
-【v2 -> v3 的变化】
-v2 用的 LunarCrush "加密类别话题榜"接口（category/cryptocurrencies/topics）
-返回 402 Payment Required ——
-v3 换回确认能访问的基础接口 coins/list/v2（之前一直没报过错），
-但不再只看单个币的排名，而是自己把"赛道/叙事"拼出来：
+【和 v3 的区别】
+LunarCrush 需要付费套餐（最低约 $72/月）才能访问任何接口，v3 的免费额度实际上
+根本不存在。v4 换成两个完全免费、不需要注册/不需要 API key 的数据源：
 
-- coins/list/v2 每个币自带 categories 字段（比如 "layer-1,meme,ai" 这种标签）
-- 脚本按类别把所有币的 interactions_24h（24小时社交互动量）加总，
-  相当于自己算出"哪个赛道整体最热门"
-- 跟上一次运行记录的赛道排名对比，判断"整体排名是否明显上升" -> 判定为"叙事升温"
-- 推送时附带该赛道里涨幅最猛的1-2个代表性币种，作为"由谁带动"的参考
+1. CoinGecko 趋势榜（/search/trending）
+   过去24小时被搜索最多的币种和赛道，免费无需key。
+   检测"新出现在趋势榜里的币"，类似之前微博热搜监控的逻辑。
 
-这样完全在你现有免费/试用额度能访问的接口范围内实现"叙事级别"的监控，
-不需要额外付费，也不用调用可能同样受限的 AI 摘要接口。
+2. DefiLlama 协议数据（/protocols）
+   全网 DeFi 协议的锁仓资金(TVL)数据，每个协议自带"1小时变化率""24小时变化率"，
+   免费无需key。脚本按协议所属赛道（Lending、RWA、Restaking、Dexes等）做加权平均，
+   算出"哪个赛道的资金正在加速流入"，这是比社交热度更"硬"的叙事信号。
 
 依赖：
-- LUNARCRUSH_API_KEY -> https://lunarcrush.com/developers/api
-- SERVERCHAN_KEY     -> https://sct.ftqq.com/
+- SERVERCHAN_KEY -> https://sct.ftqq.com/ （唯一还需要的key，用于推送到微信）
 
 用法：
-    export LUNARCRUSH_API_KEY="..."
     export SERVERCHAN_KEY="..."
     python3 narrative_watch.py
 """
@@ -35,22 +31,23 @@ import requests
 from collections import defaultdict
 
 # ------------ 配置 ------------
-COINS_LIMIT = 300          # 拉取市值/热度前多少个币来做赛道聚合（越大覆盖面越广，但请求更久）
-CATEGORY_RANK_JUMP = 5      # 赛道排名比上次跳升超过这个名次，判定为"正在升温"
+TVL_MIN_THRESHOLD = 10_000_000    # 只关注锁仓资金超过这个数字(美元)的赛道，过滤掉噪音小赛道
+CATEGORY_CHANGE_ALERT = 3.0        # 赛道加权平均1小时变化率超过这个百分比，判定为"资金流入加速"
+COOLDOWN_REPEAT_GAP = 2.0          # 同一赛道再次提醒，变化率至少要比上次提醒时再高出这么多百分点
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
 # --------------------------------
 
-LUNARCRUSH_API_KEY = os.environ.get("LUNARCRUSH_API_KEY", "")
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY", "")
 
-COINS_LIST_URL = "https://lunarcrush.com/api4/public/coins/list/v2"
+COINGECKO_TRENDING_URL = "https://api.coingecko.com/api/v3/search/trending"
+DEFILLAMA_PROTOCOLS_URL = "https://api.llama.fi/protocols"
 
 
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"last_category_rank": {}}
+    return {"last_trending_coins": [], "alerted_categories": {}}
 
 
 def save_state(state):
@@ -58,64 +55,104 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-def fetch_coins():
-    """拉取热度靠前的币种列表（确认可访问的基础接口）"""
-    if not LUNARCRUSH_API_KEY:
-        print("[错误] 未配置 LUNARCRUSH_API_KEY")
+# ---------- 信号一：CoinGecko 趋势榜新币 ----------
+def fetch_trending_coins():
+    try:
+        resp = requests.get(COINGECKO_TRENDING_URL, timeout=15)
+        print(f"[调试] 请求CoinGecko趋势榜，状态码: {resp.status_code}")
+        resp.raise_for_status()
+        data = resp.json()
+        coins = data.get("coins", [])
+        result = []
+        for c in coins:
+            item = c.get("item", {})
+            symbol = item.get("symbol", "")
+            name = item.get("name", "")
+            rank = item.get("market_cap_rank")
+            if symbol:
+                result.append({"symbol": symbol, "name": name, "market_cap_rank": rank})
+        print(f"[调试] 拉取到 {len(result)} 个趋势币种")
+        return result
+    except Exception as e:
+        print(f"[警告] 拉取CoinGecko趋势榜失败: {e}")
         return []
 
-    headers = {"Authorization": f"Bearer {LUNARCRUSH_API_KEY}"}
-    params = {"sort": "interactions_24h", "desc": "true", "limit": COINS_LIMIT}
-    resp = requests.get(COINS_LIST_URL, headers=headers, params=params, timeout=20)
-    print(f"[调试] 请求币种列表接口，状态码: {resp.status_code}")
-    resp.raise_for_status()
-    data = resp.json().get("data", [])
-    print(f"[调试] 拉取到 {len(data)} 个币种")
-    return data
+
+def detect_new_trending(current_coins, state):
+    last_symbols = set(state.get("last_trending_coins", []))
+    current_symbols = [c["symbol"] for c in current_coins]
+
+    new_coins = []
+    if last_symbols:  # 第一次运行不算"新增"，只建立基线
+        for c in current_coins:
+            if c["symbol"] not in last_symbols:
+                new_coins.append(c)
+
+    state["last_trending_coins"] = current_symbols
+    return new_coins
 
 
-def aggregate_by_category(coins):
-    """按 categories 标签把币种的热度加总，自己拼出赛道级别的排名"""
-    category_interactions = defaultdict(float)
-    category_top_coins = defaultdict(list)  # 记录每个赛道里热度最高的几个币，用于推送时展示
-
-    for coin in coins:
-        interactions = coin.get("interactions_24h") or 0
-        symbol = coin.get("symbol", "")
-        categories_str = coin.get("categories", "") or ""
-        cats = [c.strip() for c in categories_str.split(",") if c.strip()]
-
-        for cat in cats:
-            category_interactions[cat] += interactions
-            category_top_coins[cat].append((symbol, interactions))
-
-    # 每个赛道只保留热度最高的2个代表币种
-    for cat in category_top_coins:
-        category_top_coins[cat].sort(key=lambda x: x[1], reverse=True)
-        category_top_coins[cat] = category_top_coins[cat][:2]
-
-    # 按总热度排名，生成 {类别: 排名}
-    ranked = sorted(category_interactions.items(), key=lambda x: x[1], reverse=True)
-    category_rank = {cat: idx + 1 for idx, (cat, _) in enumerate(ranked)}
-
-    return category_rank, category_top_coins
+# ---------- 信号二：DefiLlama 赛道资金流 ----------
+def fetch_defillama_protocols():
+    try:
+        resp = requests.get(DEFILLAMA_PROTOCOLS_URL, timeout=20)
+        print(f"[调试] 请求DefiLlama协议数据，状态码: {resp.status_code}")
+        resp.raise_for_status()
+        data = resp.json()
+        print(f"[调试] 拉取到 {len(data)} 个协议")
+        return data
+    except Exception as e:
+        print(f"[警告] 拉取DefiLlama协议数据失败: {e}")
+        return []
 
 
-def detect_surging_categories(category_rank, category_top_coins, state):
-    """对比上次记录，找出排名明显上升的赛道"""
-    last_rank = state.get("last_category_rank", {})
+def aggregate_category_flow(protocols):
+    """按赛道把协议的TVL加权，算出赛道整体1小时资金变化率"""
+    cat_tvl = defaultdict(float)
+    cat_weighted_change = defaultdict(float)
+    cat_top_protocols = defaultdict(list)
+
+    for p in protocols:
+        category = p.get("category") or "未分类"
+        tvl = p.get("tvl") or 0
+        change_1h = p.get("change_1h")
+
+        if tvl <= 0 or change_1h is None:
+            continue
+
+        cat_tvl[category] += tvl
+        cat_weighted_change[category] += tvl * change_1h
+        cat_top_protocols[category].append((p.get("name", ""), change_1h, tvl))
+
+    category_stats = {}
+    for cat, total_tvl in cat_tvl.items():
+        if total_tvl < TVL_MIN_THRESHOLD:
+            continue
+        avg_change = cat_weighted_change[cat] / total_tvl
+        top = sorted(cat_top_protocols[cat], key=lambda x: x[2], reverse=True)[:2]
+        category_stats[cat] = {
+            "total_tvl": total_tvl,
+            "avg_change_1h": avg_change,
+            "top_protocols": top,
+        }
+
+    return category_stats
+
+
+def detect_surging_categories(category_stats, state):
+    alerted = state.get("alerted_categories", {})
     surging = []
 
-    for cat, rank in category_rank.items():
-        prev_rank = last_rank.get(cat)
-        if prev_rank is None:
-            continue  # 第一次出现的赛道不算"升温"，只建立基线
-        jump = prev_rank - rank
-        if jump >= CATEGORY_RANK_JUMP:
-            top_coins = category_top_coins.get(cat, [])
-            surging.append((cat, prev_rank, rank, top_coins))
+    for cat, stats in category_stats.items():
+        change = stats["avg_change_1h"]
+        if change >= CATEGORY_CHANGE_ALERT:
+            last_alerted_change = alerted.get(cat)
+            if last_alerted_change is not None and (change - last_alerted_change) < COOLDOWN_REPEAT_GAP:
+                continue  # 跟上次提醒时差不多，跳过，避免刷屏
+            surging.append((cat, stats))
+            alerted[cat] = change
 
-    state["last_category_rank"] = category_rank
+    state["alerted_categories"] = alerted
     return surging
 
 
@@ -132,43 +169,4 @@ def push_to_wechat(title, content):
         else:
             print(f"[失败] {result}")
     except Exception:
-        print(f"[失败] 推送返回异常: {resp.text}")
-
-
-def main():
-    state = load_state()
-
-    coins = fetch_coins()
-    if not coins:
-        print("[警告] 没拉到币种数据，检查 LUNARCRUSH_API_KEY 是否正确")
-        save_state(state)
-        sys.exit(1)
-
-    category_rank, category_top_coins = aggregate_by_category(coins)
-    print(f"[调试] 聚合出 {len(category_rank)} 个赛道")
-
-    surging = detect_surging_categories(category_rank, category_top_coins, state)
-    save_state(state)
-
-    if not surging:
-        print("本次没有明显升温的赛道，不推送")
-        return
-
-    lines = []
-    surging.sort(key=lambda x: x[2])  # 按当前排名从高到低展示
-    for cat, prev_rank, rank, top_coins in surging:
-        lines.append(f"📈 {cat}：第 {prev_rank} 名 -> 第 {rank} 名")
-        if top_coins:
-            coin_str = "、".join([f"{sym}" for sym, _ in top_coins])
-            lines.append(f"   由 {coin_str} 等带动")
-        lines.append("")
-
-    content = "\n".join(lines)
-    title = f"链上叙事提醒：{len(surging)}个赛道正在升温"
-    print(title)
-    print(content)
-    push_to_wechat(title, content)
-
-
-if __name__ == "__main__":
-    main()
+  
