@@ -1,0 +1,35 @@
+name: KOL推文监控
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # 每 30 分钟运行一次（UTC 时间）
+  workflow_dispatch: {}
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 运行监控脚本
+        env:
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python kol_watch.py
+
+      - name: 保存监控状态(kol_state.json)
+        run: |
+          git config user.name "kol-watch-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add kol_state.json
+          git diff --staged --quiet || git commit -m "更新KOL监控状态 [skip ci]"
+          git push
