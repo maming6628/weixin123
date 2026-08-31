@@ -1,23 +1,24 @@
 {
   "last_trending_coins": [
     "PONS",
-    "ZYLO",
     "SKR",
-    "PUMP",
-    "BTC",
-    "CASHCAT",
-    "LIT",
     "UP",
-    "CRO",
-    "ZEC",
-    "PENGU",
-    "HYPE",
+    "PUMP",
+    "LIT",
+    "BTC",
     "XMR",
-    "ETH",
-    "UNI"
+    "HYPE",
+    "BASECAT",
+    "BNB",
+    "SOL",
+    "ZEC",
+    "CRO",
+    "UNI",
+    "PEPE"
   ],
   "alerted_categories": {
     "OTC Marketplace": 4.7581525702814575,
-    "Uncollateralized Lending": 45.25446313249234
+    "Uncollateralized Lending": 45.25446313249234,
+    "Lending": 9.130011417310449
   }
 }
