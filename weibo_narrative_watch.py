@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-微博热搜"新叙事"实时监控 -> 微信推送
+微博热搜"正在飙升"实时监控 -> 微信推送
 
-跟之前那个"每天固定推一次Top10"的脚本不同，这个是专门抓"刚冒出来的新热点/
-突然爆的梗"，比如"牛来""我的女友景甜"这种一开始名次不高、但迅速冲上榜的话题。
+只抓"排名正在快速上升"的话题，不再提醒"新上榜"（新上榜太频繁，噪音大）。
 
 原理：
 - 每次运行都拉一次微博热搜榜（默认盯前50名）
-- 跟上一次运行记录的排名（state.json）做对比：
-    1) 这次是新出现在榜单里的词 -> 判定为"新热点"，直接推送
-    2) 排名比上次大幅上升（跳升超过阈值） -> 判定为"正在爆"，推送
+- 跟上一次运行记录的排名（weibo_state.json）做对比
+- 排名比上次大幅上升（跳升超过阈值）-> 判定为"正在飙升"，推送
 - 只推送"变化"，不会每次都把整个榜单推给你一遍，避免刷屏
 
-配合 GitHub Actions 每 10-15 分钟跑一次，基本能做到"热点一冒头就通知你"。
+配合 GitHub Actions 每 10-15 分钟跑一次。
 
 依赖：
 - SERVERCHAN_KEY -> https://sct.ftqq.com/ (微信扫码登录获取 SendKey)
@@ -29,8 +27,8 @@ import json
 import requests
 
 # ------------ 配置 ------------
-TOP_N = 50               # 监控热搜榜前多少名（越大越能提前发现"刚冒头"的话题）
-RANK_JUMP_THRESHOLD = 15  # 排名比上次跳升超过这个数字，判定为"正在爆"
+TOP_N = 50               # 监控热搜榜前多少名
+RANK_JUMP_THRESHOLD = 15  # 排名比上次跳升超过这个数字，判定为"正在飙升"
 STATE_FILE = os.path.join(os.path.dirname(__file__), "weibo_state.json")
 # --------------------------------
 
@@ -75,20 +73,15 @@ def fetch_hot_search():
 
 
 def detect_changes(current, last_rank):
-    """对比当前榜单和上次记录，找出新热点 / 飙升热点"""
-    new_hits = []
+    """对比当前榜单和上次记录，只找出排名飙升的话题（不再提醒新上榜）"""
     surging = []
 
     for word, (rank, hot) in current.items():
         prev_rank = last_rank.get(word)
-        if prev_rank is None:
-            # 首次运行时 last_rank 是空的，不算"新热点"，只建立基线
-            if last_rank or STATE_FILE_HAS_HISTORY:
-                new_hits.append((word, rank, hot))
-        elif (prev_rank - rank) >= RANK_JUMP_THRESHOLD:
+        if prev_rank is not None and (prev_rank - rank) >= RANK_JUMP_THRESHOLD:
             surging.append((word, prev_rank, rank, hot))
 
-    return new_hits, surging
+    return surging
 
 
 def push_to_wechat(title, content):
@@ -108,41 +101,30 @@ def push_to_wechat(title, content):
 
 
 def main():
-    global STATE_FILE_HAS_HISTORY
     state = load_state()
     last_rank = state.get("last_rank", {})
-    STATE_FILE_HAS_HISTORY = bool(last_rank)
 
     current = fetch_hot_search()
     if not current:
         print("[警告] 没抓取到热搜数据，微博接口可能变了或被限制访问")
         sys.exit(1)
 
-    new_hits, surging = detect_changes(current, last_rank)
+    surging = detect_changes(current, last_rank)
 
     # 更新排名基线
     state["last_rank"] = {word: rank for word, (rank, hot) in current.items()}
     save_state(state)
 
-    if not new_hits and not surging:
-        print("本次没有新热点或飙升热点，不推送")
+    if not surging:
+        print("本次没有飙升热点，不推送")
         return
 
-    lines = []
-    if new_hits:
-        lines.append("【新上榜】")
-        # 新热点按排名从高到低（数字越小越靠前）排序展示
-        for word, rank, hot in sorted(new_hits, key=lambda x: x[1]):
-            lines.append(f"🆕 {word}（第 {rank} 名，热度 {hot}）")
-        lines.append("")
-
-    if surging:
-        lines.append("【正在飙升】")
-        for word, prev_rank, rank, hot in sorted(surging, key=lambda x: x[2]):
-            lines.append(f"📈 {word}：第 {prev_rank} 名 -> 第 {rank} 名（热度 {hot}）")
+    lines = ["【正在飙升】"]
+    for word, prev_rank, rank, hot in sorted(surging, key=lambda x: x[2]):
+        lines.append(f"📈 {word}：第 {prev_rank} 名 -> 第 {rank} 名（热度 {hot}）")
 
     content = "\n".join(lines)
-    title = f"微博热点提醒：{len(new_hits)}个新上榜 / {len(surging)}个飙升"
+    title = f"微博热点提醒：{len(surging)}个话题正在飙升"
     print(title)
     print(content)
     push_to_wechat(title, content)
