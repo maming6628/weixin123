@@ -1,0 +1,37 @@
+name: FOMO交易员动态监控
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # 每 15 分钟运行一次（UTC 时间）
+  workflow_dispatch: {}
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 运行监控脚本
+        env:
+          FOMO_API_KEY: ${{ secrets.FOMO_API_KEY }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python fomo_trader_watch.py
+
+      - name: 保存监控状态(fomo_state.json)
+        run: |
+          git config user.name "fomo-trader-watch-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add fomo_state.json
+          git diff --staged --quiet || git commit -m "更新FOMO监控状态 [skip ci]"
+          git push
