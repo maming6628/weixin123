@@ -37,7 +37,11 @@ import requests
 # ------------ 配置：把下面换成你在fomo.family上关注的交易员handle ------------
 TRADER_HANDLES = [
     "fmpumpguy",
-    "ether_monk",
+    "CryptoCurb",
+    "aoyingziben",
+    "theunipcs",
+    "econoar",
+    "DumbCrayonEater",
 ]
 
 MAX_TRADES_PER_CHECK = 10   # 每个交易员每次最多检查最近多少条记录
