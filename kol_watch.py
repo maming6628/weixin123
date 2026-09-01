@@ -48,6 +48,8 @@ STATE_FILE = os.path.join(os.path.dirname(__file__), "kol_state.json")
 
 X_BEARER_TOKEN = os.environ.get("X_BEARER_TOKEN", "")
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY", "")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 X_API_BASE = "https://api.x.com/2"
 
