@@ -100,7 +100,22 @@ def fetch_trades(handle, headers):
         print(f"[警告] 拉取 {handle} 交易记录出错: {e}")
         return []
 
-
+def get_trade_timestamp(trade):
+    """从记录里提取一个可比较的时间戳，用于自己排序（不依赖接口返回顺序）"""
+    if trade.get("ts"):
+        try:
+            return float(trade["ts"])
+        except (TypeError, ValueError):
+            pass
+    created_at = trade.get("createdAt")
+    if created_at:
+        try:
+            from datetime import datetime
+            return datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp() * 1000
+        except (TypeError, ValueError):
+            pass
+    return 0
+    
 def get_trade_id(trade):
     """尝试从交易记录里找一个唯一标识，用于去重（根据实测数据修正过字段名）"""
     for key in ("id", "tradeId", "tx_hash", "signature", "hash", "trade_id"):
@@ -191,6 +206,7 @@ def main():
         trades = fetch_trades(handle, headers)
         if not trades:
             continue
+        trades.sort(key=get_trade_timestamp, reverse=True)
 
         last_id = state["last_trade_id"].get(handle)
         new_trades = []
