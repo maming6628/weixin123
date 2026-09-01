@@ -31,7 +31,15 @@ import requests
 # ------------ 配置：把下面的用户名换成你真正想监控的 X 账号 ------------
 KOL_USERNAMES = [
     "jiujinshan2022",
+    "fmpumpguy",
+    "zhaoxiao5781",
+    "WallStreet0Name",
+    "hexiecs",
+    "CycleStudies",
+    "brc20niubi",
     "lanaaielsa",
+    "xiaomustock",
+    "WallStreetAiBot",
 ]
 
 MAX_RESULTS_PER_CHECK = 5  # 每次最多拉取多少条新推文（越小越省钱，但极端情况下可能漏掉）
