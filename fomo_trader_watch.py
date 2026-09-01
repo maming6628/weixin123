@@ -102,31 +102,42 @@ def fetch_trades(handle, headers):
 
 
 def get_trade_id(trade):
-    """尝试从交易记录里找一个唯一标识，用于去重"""
-    for key in ("id", "tx_hash", "signature", "hash", "trade_id"):
+    """尝试从交易记录里找一个唯一标识，用于去重（根据实测数据修正过字段名）"""
+    for key in ("id", "tradeId", "tx_hash", "signature", "hash", "trade_id"):
         if trade.get(key):
             return str(trade[key])
+    # 有些记录没有显式id，但有时间戳(ts)+代币地址，组合起来当唯一标识
+    ts = trade.get("ts")
+    token_addr = (trade.get("token") or {}).get("address")
+    if ts and token_addr:
+        return f"{ts}_{token_addr}"
     # 都没有的话，用整条记录的内容做一个简易标识（兜底方案）
     return str(hash(json.dumps(trade, sort_keys=True)))
 
 
 def format_trade(handle, trade):
-    """把一条交易记录格式化成推送文本，字段名是根据官网描述猜测的，
-    如果显示不对照着RAW JSON日志调整这里的 .get() 键名"""
-    side = trade.get("side") or trade.get("type") or trade.get("action") or "交易"
-    token = (
-        trade.get("token_symbol")
-        or trade.get("symbol")
-        or trade.get("token", {}).get("symbol") if isinstance(trade.get("token"), dict) else None
-    ) or "未知代币"
-    amount_usd = trade.get("amount_usd") or trade.get("value_usd") or trade.get("usd_value") or 0
+    """把一条交易记录格式化成推送文本（根据实测返回数据修正过字段名）"""
+    token_info = trade.get("token") or {}
+    token = token_info.get("symbol") or trade.get("token_symbol") or trade.get("symbol") or "未知代币"
+
+    side = trade.get("side")
+    status = trade.get("status")
+    action_label = side or status or "动态"
+
+    amount_usd = trade.get("sizeUsd") or trade.get("amount_usd") or trade.get("value_usd") or 0
+    pnl = trade.get("realizedPnlUsd") or trade.get("unrealizedPnlUsd") or 0
+    chain = trade.get("chain") or ""
     thesis = trade.get("thesis") or trade.get("note") or trade.get("comment") or ""
 
-    text = f"{handle} {side} {token}"
+    text = f"{handle} {action_label} {token}"
+    if chain:
+        text += f"（{chain}）"
     if amount_usd:
-        text += f"（约${float(amount_usd):,.0f}）"
+        text += f"\n金额: ${float(amount_usd):,.0f}"
+    if pnl:
+        text += f"\n盈亏: ${float(pnl):,.0f}"
     if thesis:
-        text += f"\n观点：{thesis}"
+        text += f"\n观点: {thesis}"
     return text
 
 
