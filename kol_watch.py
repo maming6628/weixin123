@@ -137,6 +137,24 @@ def push_to_wechat(title, content):
     except Exception:
         print(f"[失败] 推送返回异常: {resp.text}")
 
+def push_to_telegram(text):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("[提示] 未配置 TELEGRAM_BOT_TOKEN 或 TELEGRAM_CHAT_ID，跳过Telegram推送")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        resp = requests.post(
+            url,
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "disable_web_page_preview": True},
+            timeout=10,
+        )
+        result = resp.json()
+        if result.get("ok"):
+            print("[成功] 已推送到Telegram")
+        else:
+            print(f"[失败-Telegram] {result}")
+    except Exception as e:
+        print(f"[失败-Telegram] {e}")
 
 def main():
     if not X_BEARER_TOKEN:
@@ -180,6 +198,7 @@ def main():
     print(title)
     print(content)
     push_to_wechat(title, content)
+    push_to_telegram(f"{title}\n\n{content}")
 
 
 if __name__ == "__main__":
