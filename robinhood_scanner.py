@@ -86,12 +86,15 @@ def basic_filter(a):
     sells_1h = a.get("transactions", {}).get("h1", {}).get("sells", 0)
     a.update(_age_min=age_min, _mcap=mcap, _liq=liq)
 
+    sym = a.get("_symbol")
     if age_min < MIN_AGE_MIN or age_min > MAX_AGE_HOURS * 60:
-        return False
-    if mcap < MIN_MCAP or liq < MIN_LIQ or liq / mcap < MIN_LIQ_RATIO:
-        return False
+        print(f"✗ {sym}: 上线时间不符 {age_min/60:.1f}h"); return False
+    if mcap < MIN_MCAP:
+        print(f"✗ {sym}: 市值太低 {fmt_usd(mcap)}"); return False
+    if liq < MIN_LIQ or liq / mcap < MIN_LIQ_RATIO:
+        print(f"✗ {sym}: 流动性不足 {fmt_usd(liq)} ({liq/mcap*100:.1f}%)"); return False
     if sells_1h < MIN_SELLS_1H:
-        return False
+        print(f"✗ {sym}: 1h卖出太少 ({sells_1h})"); return False
     return True
 
 
@@ -139,7 +142,9 @@ def x_mentions(symbol, addr):
     d = get("https://api.x.com/2/tweets/counts/recent",
             {"query": q, "granularity": "day"},
             headers={"Authorization": f"Bearer {X_BEARER}"}, pause=1)
-    return (d or {}).get("meta", {}).get("total_tweet_count", 0)
+    if d is None:  # 请求失败：返回 None（未查），不要当作 0 次提及
+        return None
+    return d.get("meta", {}).get("total_tweet_count", 0)
 
 
 # ============ 4. 推送 ============

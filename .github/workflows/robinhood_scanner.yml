@@ -2,7 +2,7 @@ name: Robinhood Chain Scanner
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # 每10分钟（GitHub 实际可能延迟几分钟）
+    - cron: "*/30 * * * *"   # 每30分钟（GitHub 实际可能延迟几分钟）
   workflow_dispatch:
 
 permissions:
@@ -24,8 +24,8 @@ jobs:
       - run: pip install requests
       - name: Run scanner
         env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
           X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: python robinhood_scanner.py
