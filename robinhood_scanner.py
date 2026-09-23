@@ -10,15 +10,15 @@ from datetime import datetime, timezone
 import requests
 
 # ============ 可调参数 ============
-MIN_MCAP = 10_000          # 市值下限 (USD) — 临时调低测试推送，测试完成后需改回 100_000
+MIN_MCAP = 100_000          # 市值下限 (USD)
 MIN_AGE_MIN = 10            # 上线至少 N 分钟
 MAX_AGE_HOURS = 48          # 太老的不看
 MIN_LIQ = 20_000            # 流动性下限 (USD)
 MIN_LIQ_RATIO = 0.05        # 流动性 / 市值 ≥ 5%
 MIN_SELLS_1H = 5            # 1h 内至少有 N 笔卖出（能卖 = 大概率不是蜜罐）
 MAX_TOP10_PCT = 40          # 前10持仓合计上限 (%)
-MIN_HOLDERS = 20            # 最少持币地址 — 临时调低测试推送，测试完成后需改回 150
-MIN_X_MENTIONS = 0          # 过去24h X 上提及次数下限（无 X token 时跳过此项） — 临时调低测试推送，测试完成后需改回 5
+MIN_HOLDERS = 150           # 最少持币地址
+MIN_X_MENTIONS = 5          # 过去24h X 上提及次数下限（无 X token 时跳过此项）
 MAX_TAX = 10                # 买/卖税上限 (%)
 NEW_POOL_PAGES = 3          # 扫几页 new_pools（每页20个）
 
